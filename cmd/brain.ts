@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import readline from "readline";
 import { end } from "../lib/db.js";
 import { c } from "../lib/colors.js";
-import { formatMarkdown } from "../lib/format.js";
+import { createStreamFormatter } from "../lib/format.js";
 import { MODEL, RETRIEVAL_MODEL, WRITER_MODEL, MAIN_SYSTEM, brainTools } from "../lib/prompts.js";
 import { runRetrievalAgent, type RetrievalResult } from "../lib/retrieval.js";
 import { runWriterAgent } from "../lib/writer.js";
@@ -53,78 +53,152 @@ async function main() {
   console.log(`  ${c.dim}model: ${MODEL} | retrieval: ${RETRIEVAL_MODEL} | writer: ${WRITER_MODEL} | ctrl+c to exit${c.reset}`);
   console.log();
 
-  const ask = () => {
-    rl.question(`${c.bold}${c.cyan}> ${c.reset}`, async (input) => {
-      const trimmed = input.trim();
-      if (!trimmed) {
-        ask();
-        return;
+  let lineBuffer: string[] = [];
+  let pasteTimer: ReturnType<typeof setTimeout> | null = null;
+  let processing = false;
+
+  async function handleInput(input: string) {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      prompt();
+      return;
+    }
+
+    processing = true;
+
+    try {
+      // 1. Retrieval — always run (reuse previous for short confirmations)
+      let retrieval: RetrievalResult;
+
+      if (isShortConfirmation(trimmed) && lastRetrieval) {
+        retrieval = lastRetrieval;
+        console.log(`\n  ${c.dim}using previous context${c.reset}`);
+      } else {
+        console.log(`\n  ${c.dim}remembering...${c.reset}`);
+        const contextMessages = messages.filter(
+          (m) => m.role !== "system" && m.role !== "tool"
+        );
+        contextMessages.push({ role: "user", content: trimmed });
+        retrieval = await runRetrievalAgent(contextMessages);
+        lastRetrieval = retrieval;
       }
 
-      try {
-        // 1. Retrieval — always run (reuse previous for short confirmations)
-        let retrieval: RetrievalResult;
+      // 2. Build context-prefixed user message
+      const contextBlock = buildContextBlock(retrieval);
+      messages.push({
+        role: "user",
+        content: `${contextBlock}\n\nAnvändarens meddelande:\n${trimmed}`,
+      });
 
-        if (isShortConfirmation(trimmed) && lastRetrieval) {
-          retrieval = lastRetrieval;
-          console.log(`\n  ${c.dim}using previous context${c.reset}`);
-        } else {
-          console.log(`\n  ${c.dim}remembering...${c.reset}`);
-          const contextMessages = messages.filter(
-            (m) => m.role !== "system" && m.role !== "tool"
-          );
-          contextMessages.push({ role: "user", content: trimmed });
-          retrieval = await runRetrievalAgent(contextMessages);
-          lastRetrieval = retrieval;
-        }
-
-        // 2. Build context-prefixed user message
-        const contextBlock = buildContextBlock(retrieval);
-        messages.push({
-          role: "user",
-          content: `${contextBlock}\n\nAnvändarens meddelande:\n${trimmed}`,
+      // 3. Main agent loop (may call ingest_to_brain)
+      while (true) {
+        const stream = await openai.chat.completions.create({
+          model: MODEL,
+          max_completion_tokens: 4096,
+          tools: brainTools,
+          messages,
+          stream: true,
         });
 
-        // 3. Main agent loop (may call ingest_to_brain)
-        while (true) {
-          const response = await openai.chat.completions.create({
-            model: MODEL,
-            max_completion_tokens: 4096,
-            tools: brainTools,
-            messages,
-          });
+        let content = "";
+        const toolCalls: Map<number, { id: string; name: string; args: string }> = new Map();
+        let headerPrinted = false;
+        const fmt = createStreamFormatter((s) => process.stdout.write(s));
 
-          const message = response.choices[0].message;
-          messages.push(message);
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta;
+          if (!delta) continue;
 
-          if (!message.tool_calls || message.tool_calls.length === 0) {
-            console.log(`\n${c.bold}${c.cyan}brain${c.reset}${c.dim} >${c.reset} ${formatMarkdown(message.content ?? "")}\n`);
-            break;
+          // Stream content to stdout with formatting
+          if (delta.content) {
+            if (!headerPrinted) {
+              process.stdout.write(`\n${c.bold}${c.cyan}brain${c.reset}${c.dim} >${c.reset} `);
+              headerPrinted = true;
+            }
+            fmt.push(delta.content);
+            content += delta.content;
           }
 
-          for (const toolCall of message.tool_calls) {
-            if (toolCall.function.name === "ingest_to_brain") {
-              const args = JSON.parse(toolCall.function.arguments);
-              console.log(`\n  ${c.dim}saving to memory...${c.reset}`);
-              const writerResult = await runWriterAgent(args.information, retrieval);
-              messages.push({
-                role: "tool",
-                tool_call_id: toolCall.id,
-                content: writerResult,
-              });
-              console.log(`  ${c.green}saved${c.reset}`);
+          // Accumulate tool calls
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const existing = toolCalls.get(tc.index);
+              if (existing) {
+                existing.args += tc.function?.arguments ?? "";
+              } else {
+                toolCalls.set(tc.index, {
+                  id: tc.id ?? "",
+                  name: tc.function?.name ?? "",
+                  args: tc.function?.arguments ?? "",
+                });
+              }
             }
           }
         }
-      } catch (err: any) {
-        console.error(`\n${c.red}error:${c.reset} ${err.message}\n`);
+
+        fmt.flush();
+        if (headerPrinted) process.stdout.write("\n\n");
+
+        // Reconstruct assistant message for history
+        const assistantMessage: OpenAI.ChatCompletionMessageParam = {
+          role: "assistant",
+          content: content || null,
+        };
+        const toolCallList = [...toolCalls.values()].filter((tc) => tc.id);
+        if (toolCallList.length > 0) {
+          (assistantMessage as any).tool_calls = toolCallList.map((tc) => ({
+            id: tc.id,
+            type: "function" as const,
+            function: { name: tc.name, arguments: tc.args },
+          }));
+        }
+        messages.push(assistantMessage);
+
+        // If no tool calls, we're done
+        if (toolCallList.length === 0) break;
+
+        // Process tool calls
+        for (const tc of toolCallList) {
+          if (tc.name === "ingest_to_brain") {
+            const args = JSON.parse(tc.args);
+            console.log(`  ${c.dim}saving to memory...${c.reset}`);
+            const writerResult = await runWriterAgent(args.information, retrieval);
+            messages.push({
+              role: "tool",
+              tool_call_id: tc.id,
+              content: writerResult,
+            });
+            console.log(`  ${c.green}saved${c.reset}`);
+          }
+        }
       }
+    } catch (err: any) {
+      console.error(`\n${c.red}error:${c.reset} ${err.message}\n`);
+    }
 
-      ask();
-    });
-  };
+    processing = false;
+    prompt();
+  }
 
-  ask();
+  function prompt() {
+    process.stdout.write(`${c.bold}${c.cyan}> ${c.reset}`);
+  }
+
+  rl.on("line", (line) => {
+    if (processing) return;
+
+    lineBuffer.push(line);
+
+    if (pasteTimer) clearTimeout(pasteTimer);
+    pasteTimer = setTimeout(() => {
+      const input = lineBuffer.join("\n");
+      lineBuffer = [];
+      pasteTimer = null;
+      handleInput(input);
+    }, 50);
+  });
+
+  prompt();
 
   rl.on("close", async () => {
     console.log(`\n${c.dim}bye!${c.reset}`);

@@ -2,6 +2,7 @@ import type OpenAI from "openai";
 
 export const MODEL = "gpt-5.2";
 export const RETRIEVAL_MODEL = "gpt-5.2";
+export const MAX_TOOL_CALLS = 20;
 
 export const MAIN_SYSTEM = `Du är Big Brain — ett intelligent minne som lagrar och kopplar ihop anteckningar och information.
 
@@ -47,7 +48,7 @@ VIKTIGT — följ denna strategi EXAKT:
 3. Om du behöver bredare sökning, använd search_chunks.
 4. Svara ALDRIG att du inte hittat information utan att ha anropat get_subject_chunks minst en gång.
 
-Max 15 tool calls totalt. När du har tillräckligt med information, svara med en strukturerad sammanfattning. Inkludera relevanta detaljer, datum och kontext.`;
+Max ${MAX_TOOL_CALLS} tool calls totalt. När du har tillräckligt med information, svara med en strukturerad sammanfattning. Inkludera relevanta detaljer, datum och kontext.`;
 
 export const brainTools: OpenAI.ChatCompletionTool[] = [
   {

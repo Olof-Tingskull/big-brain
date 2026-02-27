@@ -10,7 +10,7 @@ import {
 } from "./write-tools.js";
 import { search_subjects } from "./tools.js";
 import { c } from "./colors.js";
-import { WRITER_MODEL, WRITER_SYSTEM, writerTools } from "./prompts.js";
+import { WRITER_MODEL, WRITER_SYSTEM, writerTools, MAX_TOOL_CALLS } from "./prompts.js";
 import type { RetrievalResult } from "./retrieval.js";
 
 const openai = new OpenAI();
@@ -78,7 +78,7 @@ export async function runWriterAgent(
 
   let toolCallCount = 0;
 
-  while (toolCallCount < 15) {
+  while (toolCallCount < MAX_TOOL_CALLS) {
     const response = await openai.chat.completions.create({
       model: WRITER_MODEL,
       max_completion_tokens: 4096,

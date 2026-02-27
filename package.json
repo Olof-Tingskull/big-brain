@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "seed": "tsx cmd/seed.ts",
+    "clear": "tsx cmd/clear.ts",
     "brain": "tsx cmd/brain.ts",
     "studio": "drizzle-kit studio",
     "db:generate": "drizzle-kit generate",

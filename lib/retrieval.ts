@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { search_subjects, get_subject_chunks, search_chunks, get_chunk_subjects } from "./tools.js";
 import { c } from "./colors.js";
-import { RETRIEVAL_MODEL, RETRIEVAL_SYSTEM, retrievalTools } from "./prompts.js";
+import { RETRIEVAL_MODEL, RETRIEVAL_SYSTEM, retrievalTools, MAX_TOOL_CALLS } from "./prompts.js";
 
 const openai = new OpenAI();
 
@@ -77,7 +77,7 @@ export async function runRetrievalAgent(
 
   let toolCallCount = 0;
 
-  while (toolCallCount < 15) {
+  while (toolCallCount < MAX_TOOL_CALLS) {
     const response = await openai.chat.completions.create({
       model: RETRIEVAL_MODEL,
       max_completion_tokens: 4096,
