@@ -1,9 +1,17 @@
 import OpenAI from "openai";
-import { search_subjects, get_subject_chunks, search_chunks } from "./tools.js";
+import { search_subjects, get_subject_chunks, search_chunks, get_chunk_subjects } from "./tools.js";
 import { c } from "./colors.js";
 import { RETRIEVAL_MODEL, RETRIEVAL_SYSTEM, retrievalTools } from "./prompts.js";
 
 const openai = new OpenAI();
+
+export type RetrievalResult = {
+  summary: string;
+  data: {
+    subjects: { id: number; name: string; type: string; summary: string | null }[];
+    chunks: { id: number; content: string; metadata: unknown; created_at: Date | null }[];
+  };
+};
 
 async function executeRetrievalTool(
   name: string,
@@ -13,9 +21,11 @@ async function executeRetrievalTool(
     case "search_subjects":
       return JSON.stringify(await search_subjects(input.query));
     case "get_subject_chunks":
-      return JSON.stringify(await get_subject_chunks(input.subject_id, input.type));
+      return JSON.stringify(await get_subject_chunks(input.subject_id, input.limit));
     case "search_chunks":
       return JSON.stringify(await search_chunks(input.query));
+    case "get_chunk_subjects":
+      return JSON.stringify(await get_chunk_subjects(input.chunk_id));
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -26,13 +36,14 @@ function toolColor(name: string): string {
     case "search_subjects": return c.cyan;
     case "get_subject_chunks": return c.magenta;
     case "search_chunks": return c.yellow;
+    case "get_chunk_subjects": return c.green;
     default: return c.white;
   }
 }
 
 export async function runRetrievalAgent(
   conversationMessages: OpenAI.ChatCompletionMessageParam[]
-): Promise<string> {
+): Promise<RetrievalResult> {
   const contextSummary = conversationMessages
     .map((m) => {
       const role = m.role === "user" ? "Användare" : "Assistent";
@@ -60,6 +71,10 @@ export async function runRetrievalAgent(
     },
   ];
 
+  // Accumulate raw results for structured output
+  const collectedSubjects = new Map<number, { id: number; name: string; type: string; summary: string | null }>();
+  const collectedChunks = new Map<number, { id: number; content: string; metadata: unknown; created_at: Date | null }>();
+
   let toolCallCount = 0;
 
   while (toolCallCount < 15) {
@@ -76,7 +91,13 @@ export async function runRetrievalAgent(
     messages.push(message);
 
     if (!message.tool_calls || message.tool_calls.length === 0) {
-      return message.content ?? "";
+      return {
+        summary: message.content ?? "",
+        data: {
+          subjects: [...collectedSubjects.values()],
+          chunks: [...collectedChunks.values()],
+        },
+      };
     }
 
     for (const toolCall of message.tool_calls) {
@@ -89,6 +110,22 @@ export async function runRetrievalAgent(
       const parsed = JSON.parse(result);
       const count = Array.isArray(parsed) ? parsed.length : 0;
       console.log(`       ${count > 0 ? c.green : c.red}${count} results${c.reset}`);
+
+      // Collect structured data
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (toolCall.function.name === "search_subjects" || toolCall.function.name === "get_chunk_subjects") {
+            if (item.id != null && item.name) {
+              collectedSubjects.set(item.id, { id: item.id, name: item.name, type: item.type, summary: item.summary });
+            }
+          } else {
+            if (item.id != null && item.content) {
+              collectedChunks.set(item.id, { id: item.id, content: item.content, metadata: item.metadata, created_at: item.created_at });
+            }
+          }
+        }
+      }
+
       messages.push({
         role: "tool",
         tool_call_id: toolCall.id,
@@ -97,9 +134,21 @@ export async function runRetrievalAgent(
     }
 
     if (choice.finish_reason === "stop") {
-      return message.content ?? "";
+      return {
+        summary: message.content ?? "",
+        data: {
+          subjects: [...collectedSubjects.values()],
+          chunks: [...collectedChunks.values()],
+        },
+      };
     }
   }
 
-  return "Retrieval-agenten nådde max antal tool calls utan att ge ett slutsvar.";
+  return {
+    summary: "Retrieval-agenten nådde max antal tool calls utan att ge ett slutsvar.",
+    data: {
+      subjects: [...collectedSubjects.values()],
+      chunks: [...collectedChunks.values()],
+    },
+  };
 }

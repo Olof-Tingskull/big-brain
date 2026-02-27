@@ -1,8 +1,9 @@
-import { query, end } from "./lib/db.js";
-import { embedBatch } from "./lib/embeddings.js";
+import { db, end } from "../lib/db.js";
+import { chunks, subjects, chunkSubjects } from "../lib/schema.js";
+import { embedBatch } from "../lib/embeddings.js";
 import "dotenv/config";
 
-const subjects = [
+const subjectData = [
   // === PEOPLE (10) ===
   {
     name: "Ella",
@@ -56,7 +57,7 @@ const subjects = [
     name: "Freja",
     type: "person",
     summary:
-      "Freja Johansson, 27 år. Läkarstuderande, termin 10. Gruppens ansvarsfulla mamma-figur. Försöker medla i konflikter. Planerar en gemensam sommarresa till Grekland. Orolig för Wilmas drickande. Singel sedan 2024, fokuserar på studierna. Är den enda som alla i gruppen litar fullt ut på.",
+      "Freja Johansson, 27 år. Läkarstuderande, termin 10. Gruppens ansvarsfulla mamma-figur. Försöker medla i konflikter. Planerar en gemensam sommarrese till Grekland. Orolig för Wilmas drickande. Singel sedan 2024, fokuserar på studierna. Är den enda som alla i gruppen litar fullt ut på.",
   },
   {
     name: "Anton",
@@ -163,10 +164,8 @@ function daysAgo(n: number): Date {
   return d;
 }
 
-const chunks: {
+const chunkData: {
   content: string;
-  type: string;
-  source: string;
   metadata: object;
   created_at: Date;
   subjectNames: string[];
@@ -175,8 +174,7 @@ const chunks: {
   {
     content:
       "Ella gjorde slut med Kasper igår kväll. Hon sa att hon 'inte känner det längre' och att hon 'behöver hitta sig själv'. Kasper grät. De har varit ihop i tre år. Moa ringde mig efteråt — hon visste inte vad hon skulle säga, hon älskar dem båda. Joel fick veta av Kasper vid midnatt, sa att Kasper var helt förstörd.",
-    type: "note",
-    source: "manual",
+
     metadata: { emotional: true, life_event: "breakup" },
     created_at: daysAgo(120),
     subjectNames: ["Ella", "Kasper", "Moa", "Joel", "Uppbrottet"],
@@ -184,8 +182,7 @@ const chunks: {
   {
     content:
       "Första fredagsmiddagen efter uppbrottet. Ella kom, Kasper kom inte. Stämningen var tryckt. Joel verkade stressad över att vara mitt emellan sin bästa kompis och resten av gruppen. Moa försökte hålla konversationen igång men det var jobbigt. Wilma drack för mycket och sa högt 'det är ju skönt att slippa den elefanten i rummet' vilket fick Ella att gråta.",
-    type: "note",
-    source: "manual",
+
     metadata: { dinner: true, awkward: true },
     created_at: daysAgo(115),
     subjectNames: ["Ella", "Kasper", "Joel", "Moa", "Wilma", "Fredagsmiddagarna", "Uppbrottet", "Gruppdynamiken"],
@@ -193,8 +190,7 @@ const chunks: {
   {
     content:
       "Kasper berättade för Joel att han fortfarande älskar Ella. Säger att han vill 'kämpa för att få henne tillbaka'. Joel rådde honom att ge henne utrymme. Kasper har börjat kolla terapi — sin mamma föreslog det. Joel sa till mig efteråt att han tycker det är jättejobbigt att vara Kaspers bästa kompis och samtidigt hänga med Ella i gruppen.",
-    type: "note",
-    source: "manual",
+
     metadata: { confidential: true },
     created_at: daysAgo(110),
     subjectNames: ["Kasper", "Joel", "Ella", "Uppbrottet"],
@@ -202,8 +198,7 @@ const chunks: {
   {
     content:
       "Kasper började i terapi idag. Psykologen heter Maria. Han sa att det kändes bra att prata med någon neutral. Pratar om uppbrottet men också om att han alltid har haft svårt att vara ensam. Joel följde med till väntrummet som stöd.",
-    type: "note",
-    source: "manual",
+
     metadata: { therapy: true },
     created_at: daysAgo(95),
     subjectNames: ["Kasper", "Joel", "Uppbrottet"],
@@ -213,8 +208,7 @@ const chunks: {
   {
     content:
       "Shit. Kasper och Wilma hånglade på Wilmas efterfest förra lördagen. Kasper var full och ledsen, Wilma var full som vanligt. Det 'bara hände'. Båda ångrar sig. Wilma ringde mig på söndagen och var livrädd att Ella ska få veta. Kasper bad henne att aldrig berätta. Jag lovade att hålla tyst men det känns hemskt.",
-    type: "note",
-    source: "manual",
+
     metadata: { secret: true, drama: true },
     created_at: daysAgo(100),
     subjectNames: ["Kasper", "Wilma", "Ella", "Uppbrottet"],
@@ -222,8 +216,7 @@ const chunks: {
   {
     content:
       "Wilma mår dåligt över Kasper-grejen. Hon sa att hon 'förstörde den osynliga kompiskoden' och att Ella aldrig skulle förlåta henne om det kom ut. Jag frågade om hon hade feelings för Kasper — hon sa absolut inte, det var bara fylla och dåligt omdöme. Hon har undvikit Ella i en vecka nu och hittar på ursäkter.",
-    type: "note",
-    source: "manual",
+
     metadata: { guilt: true },
     created_at: daysAgo(95),
     subjectNames: ["Wilma", "Kasper", "Ella", "Uppbrottet"],
@@ -233,8 +226,7 @@ const chunks: {
   {
     content:
       "Jag tror att Ella har feelings för Joel. Märkte det på nyårsfesten — hon kunde inte sluta titta på honom när han spelade gitarr. Sen när Joel gav henne sin jacka för att hon frös blev hon alldeles röd. Frågade henne rakt ut nästa dag. Hon nekade först men erkände sen: 'Okej ja, men det spelar ingen roll. Han är Kaspers bästa kompis. Det kan aldrig hända.'",
-    type: "note",
-    source: "manual",
+
     metadata: { crush: true, secret: true },
     created_at: daysAgo(85),
     subjectNames: ["Ella", "Joel", "Kasper", "Kärlekstriangeln"],
@@ -242,8 +234,7 @@ const chunks: {
   {
     content:
       "Saga har börjat på Rost! Hon är ny i Göteborg, kom från Stockholm. Jättetrevlig, energisk. Ella gillar henne. De jobbar samma skift på tisdagar och torsdagar. Saga frågade direkt om kompiskretsen och blev inbjuden att hänga med på fredagsmiddagen.",
-    type: "note",
-    source: "manual",
+
     metadata: { new_person: true },
     created_at: daysAgo(80),
     subjectNames: ["Saga", "Ella", "Fredagsmiddagarna"],
@@ -251,8 +242,7 @@ const chunks: {
   {
     content:
       "Saga träffade Joel för första gången på fredagsmiddagen hos Freja. De klickade direkt — pratade om musik i timmar. Saga är tydligen stor indiefan. Joel var mer energisk än jag sett honom på länge. Ella satt bredvid och jag såg hur hennes leende dog lite inuti. Efteråt sa Ella till mig: 'Typiskt. Precis när jag bestämt mig för att vara modig.'",
-    type: "note",
-    source: "manual",
+
     metadata: { turning_point: true },
     created_at: daysAgo(75),
     subjectNames: ["Saga", "Joel", "Ella", "Freja", "Kärlekstriangeln", "Fredagsmiddagarna"],
@@ -260,8 +250,7 @@ const chunks: {
   {
     content:
       "Saga dök upp på Dimljus repp igår. Joel hade tydligen bjudit in henne. Noel berättade att det var awkward — Saga satt och filmade Joel med sin telefon. Kasper var där också och verkade inte bry sig men Noel sa att stämningen var 'konstig'. Joel verkar helt blind för att det finns spänningar.",
-    type: "note",
-    source: "manual",
+
     metadata: {},
     created_at: daysAgo(60),
     subjectNames: ["Saga", "Joel", "Noel", "Kasper", "Dimljus", "Bandrepetitionerna", "Kärlekstriangeln"],
@@ -269,8 +258,7 @@ const chunks: {
   {
     content:
       "Ella kom hem till mig och grät igår. Hon hade sett på Instagram att Joel och Saga hade ätit lunch ihop. 'Det är inte som att vi är tillsammans, jag har ingen rätt att vara arg.' Men hon är arg. Och ledsen. Och frustrerad på sig själv att hon aldrig sa något. Jag (Freja) föreslog att hon kanske borde prata med Joel, men Ella vägrade: 'Om han gillar Saga så gillar han Saga. Jag vill inte vara den som förstör.'",
-    type: "note",
-    source: "manual",
+
     metadata: { emotional: true },
     created_at: daysAgo(50),
     subjectNames: ["Ella", "Joel", "Saga", "Freja", "Kärlekstriangeln"],
@@ -278,8 +266,7 @@ const chunks: {
   {
     content:
       "Intressant twist: Joel frågade Noel om han tror att Ella 'agerar konstigt mot honom'. Noel sa att Joel märkt att Ella blivit tystare och undviker ögonkontakt. Noel ville säga sanningen men visste inte om det var hans att berätta. Nöjde sig med: 'Prata med henne.' Joel sa: 'Om vad? Jag vet inte ens vad problemet är.'",
-    type: "note",
-    source: "manual",
+
     metadata: { clueless_joel: true },
     created_at: daysAgo(40),
     subjectNames: ["Joel", "Noel", "Ella", "Kärlekstriangeln"],
@@ -289,8 +276,7 @@ const chunks: {
   {
     content:
       "Theo berättade att han är 'lite knapert just nu' när Moa frågade varför han aldrig vill äta ute längre. Han skyller på att gymmet höjde priserna och att han 'investerade lite i crypto som gick åt helvete'. Sanningen: han har spelat bort nästan 80 000 kr på nätcasino sedan i somras. Moa verkade köpa förklaringen.",
-    type: "note",
-    source: "manual",
+
     metadata: { lie: true, gambling: true },
     created_at: daysAgo(90),
     subjectNames: ["Theo", "Moa", "Theos hemlighet", "Pengastressen"],
@@ -298,8 +284,7 @@ const chunks: {
   {
     content:
       "Theo lånade 20 000 kr av Kasper. Sa att det var till 'en investering som skulle betala tillbaka sig dubbelt'. Kasper litade på honom. Lovade att betala tillbaka i januari. Det är nu februari och Theo har inte nämnt det. Kasper har inte frågat ännu men börjar undra.",
-    type: "note",
-    source: "manual",
+
     metadata: { debt: true, amount: 20000 },
     created_at: daysAgo(70),
     subjectNames: ["Theo", "Kasper", "Theos hemlighet", "Pengastressen"],
@@ -307,8 +292,7 @@ const chunks: {
   {
     content:
       "Noel berättade att han av misstag såg Theos telefon på gymmet — en notis från ett nätcasino: 'Välkommen tillbaka! Sätt in 500 kr och få 500 kr bonus.' Noel blev iskall. Konfronterade Theo i omklädningsrummet. Theo bröt ihop och erkände allt: 80 000 kr borta, lånet från Kasper, att han ljuger för Moa. Bad Noel att inte berätta. Noel lovade motvilligt.",
-    type: "note",
-    source: "manual",
+
     metadata: { revelation: true, confidential: true },
     created_at: daysAgo(55),
     subjectNames: ["Noel", "Theo", "Kasper", "Moa", "Theos hemlighet", "Gymgänget"],
@@ -316,8 +300,7 @@ const chunks: {
   {
     content:
       "Noel är i en omöjlig sits. Han vet att Theo spelar, vet att Moa blir lurad, och kan inte säga något utan att bryta sitt löfte. Han frågade mig (Freja) hypotetiskt: 'Om du visste att en kompis partner ljög om något stort, skulle du berätta?' Jag sa ja utan att tveka. Noel sa bara 'hmm' och bytte ämne. Jag undrar vad han vet.",
-    type: "note",
-    source: "manual",
+
     metadata: { moral_dilemma: true },
     created_at: daysAgo(45),
     subjectNames: ["Noel", "Freja", "Theo", "Moa", "Theos hemlighet"],
@@ -325,8 +308,7 @@ const chunks: {
   {
     content:
       "Theo kunde inte betala sin del av middagen igår och sa att han 'glömt plånboken'. Anton lade ut för honom. Sen på vägen hem sa Anton till mig: 'Theo har sagt att han glömt plånboken tre gånger nu. Antingen har han världens sämsta minne eller så har han problem.' Jag tror Anton börjar fatta.",
-    type: "note",
-    source: "manual",
+
     metadata: { suspicious: true },
     created_at: daysAgo(30),
     subjectNames: ["Theo", "Anton", "Theos hemlighet", "Pengastressen"],
@@ -334,8 +316,7 @@ const chunks: {
   {
     content:
       "TODO: Prata med Theo om pengasituationen. Kasper vill ha tillbaka sina 20 000 och börjar bli frustrerad. Theo undviker hans meddelanden. Det här kan bli en grej som sprider sig i gruppen.",
-    type: "todo",
-    source: "manual",
+
     metadata: { priority: "high" },
     created_at: daysAgo(20),
     subjectNames: ["Theo", "Kasper", "Theos hemlighet", "Pengastressen"],
@@ -345,8 +326,7 @@ const chunks: {
   {
     content:
       "Wilma var för full igen på lördagen. Spillde rödvin på Moas vita soffa och skrattade bara åt det. Ella fick köra hem henne. På vägen hem i bilen sa Wilma plötsligt: 'Vet du att jag hånglade med Kasper?' Ella trodde hon skojade. Wilma somnade innan hon kunde svara. På söndagen sa Wilma att hon inte mindes nåt från kvällen.",
-    type: "note",
-    source: "manual",
+
     metadata: { close_call: true, drinking: true },
     created_at: daysAgo(65),
     subjectNames: ["Wilma", "Ella", "Kasper", "Moa", "Wilmas gräns"],
@@ -354,8 +334,7 @@ const chunks: {
   {
     content:
       "Freja tog Wilma åt sidan efter söndagsbrunchen. 'Jag är orolig för dig. Du dricker varje helg, du missar jobb, du verkade inte minnas igår.' Wilma blev defensiv: 'Sluta mamma mig, jag är 27, jag har kul.' Freja: 'Det ser inte ut som kul längre.' Wilma gick. De har inte pratat ordentligt sedan dess.",
-    type: "note",
-    source: "manual",
+
     metadata: { confrontation: true, friendship_strain: true },
     created_at: daysAgo(62),
     subjectNames: ["Freja", "Wilma", "Wilmas gräns"],
@@ -363,8 +342,7 @@ const chunks: {
   {
     content:
       "Wilma missade jobbet på Systembolaget igen på måndagen. Tredje gången denna månad. Chefen sa att nästa gång blir det en skriftlig varning. Wilma berättade det för mig som om det var ett skämt men jag hörde att hon var rädd.",
-    type: "note",
-    source: "manual",
+
     metadata: { work_issue: true },
     created_at: daysAgo(35),
     subjectNames: ["Wilma", "Wilmas gräns", "Pengastressen"],
@@ -372,8 +350,7 @@ const chunks: {
   {
     content:
       "Joel och Noel pratade om Wilma efter reppet. Joel: 'Har du märkt att Wilma alltid är full nu? Inte bara på fester utan typ hela tiden?' Noel: 'Ja. Freja försökte prata med henne men det gick inte bra.' Joel kände sig skyldig: 'Vi borde göra nåt. Vi kan inte bara titta på.' De bestämde sig för att prata med Freja om en gemensam intervention.",
-    type: "note",
-    source: "manual",
+
     metadata: { concern: true },
     created_at: daysAgo(25),
     subjectNames: ["Joel", "Noel", "Wilma", "Freja", "Wilmas gräns", "Bandrepetitionerna"],
@@ -383,8 +360,7 @@ const chunks: {
   {
     content:
       "Noel skrev en låt som uppenbarligen handlar om Moa. Texten börjar: 'Du målar världen i färger jag aldrig sett.' Joel frågade vem den handlade om. Noel sa 'ingen speciell'. Joel köpte det inte men pressade inte. Låten är vacker dock — den bästa Noel skrivit.",
-    type: "note",
-    source: "manual",
+
     metadata: { music: true, unrequited_love: true },
     created_at: daysAgo(70),
     subjectNames: ["Noel", "Moa", "Joel", "Dimljus"],
@@ -392,8 +368,7 @@ const chunks: {
   {
     content:
       "Moa bad Noel om hjälp med texterna till sin vernissage — hon vill ha poesi brevid tavlorna. Noel sa ja direkt (såklart). De har suttit på kaféer och jobbat tillsammans tre gånger nu. Theo verkar inte bry sig, han vet inte ens att de ses. Noel sa till mig: 'Jag vet att det aldrig kan hända. Men de här stunderna räcker.' Det bröt mitt hjärta lite.",
-    type: "note",
-    source: "manual",
+
     metadata: { bittersweet: true },
     created_at: daysAgo(40),
     subjectNames: ["Noel", "Moa", "Theo", "Moas vernissage"],
@@ -403,8 +378,7 @@ const chunks: {
   {
     content:
       "Anton berättade att han flyttade från Malmö 'för att det inte funkade med mitt ex'. Men han vägrar ge detaljer. När Wilma frågade vad exet hette tittade Anton bort och sa 'det spelar ingen roll'. Wilma sa efteråt: 'Folk som inte vill prata om sina ex döljer nåt. Trust me.'",
-    type: "note",
-    source: "manual",
+
     metadata: { mysterious: true },
     created_at: daysAgo(55),
     subjectNames: ["Anton", "Wilma", "Gruppdynamiken"],
@@ -412,8 +386,7 @@ const chunks: {
   {
     content:
       "Freja och Anton hade en lång promenad längs kanalen igår. De pratade i tre timmar. Anton öppnade sig lite — sa att hans ex 'kontrollerade allting' och att han 'tappade sig själv'. Freja kände igen det från sin egen förra relation. Hon sa att hon kände sig trygg med Anton på ett sätt hon inte känt på länge. Men hon sa inget om sina feelings.",
-    type: "note",
-    source: "manual",
+
     metadata: { romantic_tension: true },
     created_at: daysAgo(35),
     subjectNames: ["Freja", "Anton", "Gruppdynamiken"],
@@ -421,8 +394,7 @@ const chunks: {
   {
     content:
       "Jag (Ella) googlade Anton lite — hittade inget konstigt men hans Instagram är skapad i november, samma månad han flyttade. Inga bilder äldre än 3 månader. Wilma säger att det är en 'red flag' men jag tycker hon överdriver. Freja verkar verkligen gilla honom och hon förtjänar nån bra.",
-    type: "note",
-    source: "manual",
+
     metadata: { investigation: true },
     created_at: daysAgo(28),
     subjectNames: ["Anton", "Ella", "Wilma", "Freja"],
@@ -430,8 +402,7 @@ const chunks: {
   {
     content:
       "Anton berättade hela historien för Freja. Hans ex hette Daniella, de var ihop i 4 år. Hon var psykiskt kontrollerande — kollade hans telefon, bestämde vilka han fick träffa, blev aggressiv om han kom hem sent. Anton till slut lyckades lämna med hjälp av sin syster. Raderade sociala medier för att hon inte skulle kunna spåra honom. Freja grät när han berättade. De kramades länge.",
-    type: "note",
-    source: "manual",
+
     metadata: { vulnerability: true, backstory: true },
     created_at: daysAgo(15),
     subjectNames: ["Anton", "Freja"],
@@ -441,8 +412,7 @@ const chunks: {
   {
     content:
       "Freja skickade ut förslaget om Grekland-resan i gruppchaten. Reaktioner: Joel — 'Hell yes!', Moa — 'Om jag har råd', Ella — 'Vilka åker?', Noel — 'Jag är med', Wilma — 'GREKLAND BABY', Kasper — läste meddelandet men svarade inte, Theo — 'Ska kolla schemat', Saga — '🎉🎉', Anton — 'Låter kul!'. Frånvaron av Kaspers svar säger allt.",
-    type: "note",
-    source: "manual",
+
     metadata: { group_chat: true, trip_planning: true },
     created_at: daysAgo(45),
     subjectNames: ["Freja", "Joel", "Moa", "Ella", "Noel", "Wilma", "Kasper", "Saga", "Anton", "Theo", "Sommarresan", "Gruppdynamiken"],
@@ -450,8 +420,7 @@ const chunks: {
   {
     content:
       "Ella sa till mig att hon inte vill åka på resan om Saga åker. 'En vecka i Grekland och se Joel och Saga flörta? Nej tack.' Men hon vill inte heller vara den som ställer ett ultimatum. Freja suckade: 'Kan vi inte bara ha det kul som vi brukade?' Ella: 'Det var innan allt blev komplicerat.'",
-    type: "note",
-    source: "manual",
+
     metadata: { trip_drama: true },
     created_at: daysAgo(40),
     subjectNames: ["Ella", "Saga", "Joel", "Freja", "Sommarresan", "Kärlekstriangeln"],
@@ -459,8 +428,7 @@ const chunks: {
   {
     content:
       "Kasper meddelade att han inte åker på Grekland-resan. Sa att han 'har för mycket att göra med appen'. Alla vet att det är för att Ella åker. Joel försökte övertala honom privat men Kasper sa: 'Jag klarar inte av att se henne ha kul utan mig ännu. Ge mig tid.' Joel respekterade det men var ledsen.",
-    type: "note",
-    source: "manual",
+
     metadata: {},
     created_at: daysAgo(35),
     subjectNames: ["Kasper", "Ella", "Joel", "Sommarresan", "Uppbrottet"],
@@ -468,8 +436,7 @@ const chunks: {
   {
     content:
       "TODO: Boka flygbiljetter till Grekland senast 15 mars. Freja har hittat billiga biljetter Göteborg-Aten för 2 800 kr tur/retur. Bekräftade deltagare: Joel, Noel, Ella, Freja, Anton, Saga. Osäkra: Moa (pengar), Wilma (jobb), Theo (säger att han 'ska kolla'). Kasper åker inte.",
-    type: "todo",
-    source: "manual",
+
     metadata: { priority: "medium", deadline: "2026-03-15", budget_pp: 15000 },
     created_at: daysAgo(32),
     subjectNames: ["Freja", "Sommarresan", "Pengastressen"],
@@ -479,8 +446,7 @@ const chunks: {
   {
     content:
       "Erik, Dimljus trummis, meddelade att han slutar i bandet. Flyttar till Berlin med sin tjej. Joel och Noel är förstörda — de har spelat ihop i 3 år. Way Out West-ansökan skickades in förra månaden med Erik som trummis. Nu behöver de hitta ersättare ASAP och spela in en ny demo.",
-    type: "note",
-    source: "manual",
+
     metadata: { band_crisis: true },
     created_at: daysAgo(50),
     subjectNames: ["Joel", "Noel", "Dimljus"],
@@ -488,8 +454,7 @@ const chunks: {
   {
     content:
       "Dimljus har testat tre trummisar. Första: tekniskt bra men spelade för högt. Andra: nice kille men kunde bara spela punk. Tredje: fantastisk men bor i Borås och kan inte komma på varje repp. Joel börjar bli desperat. Deadline för Way Out West-demon är i slutet av mars.",
-    type: "note",
-    source: "manual",
+
     metadata: { auditions: true },
     created_at: daysAgo(25),
     subjectNames: ["Joel", "Noel", "Dimljus"],
@@ -497,8 +462,7 @@ const chunks: {
   {
     content:
       "Plot twist: Anton nämnde att han spelade trummor i ett band i Malmö. Joel fick helt galna ögon. Anton provade på söndagens repp och det lät SJUKT BRA. Noel sa efteråt: 'Det var som att han alltid hade spelat med oss.' Joel vill ha honom i bandet permanent. Anton sa att han behöver tänka på det — 'låt mig inte commita till nåt igen för snabbt.'",
-    type: "note",
-    source: "manual",
+
     metadata: { breakthrough: true },
     created_at: daysAgo(12),
     subjectNames: ["Anton", "Joel", "Noel", "Dimljus", "Bandrepetitionerna"],
@@ -508,8 +472,7 @@ const chunks: {
   {
     content:
       "Moa visade mig sina tavlor till utställningen. Temat 'Mellanrum' — det handlar om luckor i relationer, saker man inte säger. En tavla föreställer två personer som sitter bredvid varandra men tittar åt varsitt håll. En annan är ett halvt telefonsamtal. Jag frågade om det var inspirerat av verkligheten. Hon sa: 'Allt är det ju.' Jag tror det handlar om henne och Ella.",
-    type: "note",
-    source: "manual",
+
     metadata: { art: true, emotional: true },
     created_at: daysAgo(30),
     subjectNames: ["Moa", "Ella", "Moas vernissage", "Gruppdynamiken"],
@@ -517,8 +480,7 @@ const chunks: {
   {
     content:
       "Moa och Ella hade en riktig pratstund för första gången på veckor. Moa bad Ella om hjälp med cateringen till vernissagen. Ella sa ja men det var stelt. Moa sa efteråt: 'Det känns som att vi pratar genom en glasvägg. Allt är artigt men ingenting är äkta längre.' Ella har inte berättat om sin crush på Joel för Moa.",
-    type: "note",
-    source: "manual",
+
     metadata: { friendship: true, distance: true },
     created_at: daysAgo(22),
     subjectNames: ["Moa", "Ella", "Moas vernissage", "Kärlekstriangeln", "Gruppdynamiken"],
@@ -526,8 +488,7 @@ const chunks: {
   {
     content:
       "TODO: Hjälpa Moa med vernissage-cateringen den 12 april. Ella bakar, Freja fixar dryck. Noel levererar texterna senast 5 april. Gästlista: ~60 personer. Moa vill att alla i gänget kommer — inklusive Kasper. Det blir första gången alla är i samma rum sedan november.",
-    type: "todo",
-    source: "manual",
+
     metadata: { priority: "medium", date: "2026-04-12" },
     created_at: daysAgo(18),
     subjectNames: ["Moa", "Ella", "Freja", "Noel", "Kasper", "Moas vernissage"],
@@ -537,8 +498,7 @@ const chunks: {
   {
     content:
       "Kasper visade mig Blindspot-appen. Den är faktiskt riktigt snygg. Konceptet: du svarar på personlighetsfrågor och matchas baserat på kompatibilitet. Inga bilder förrän efter 3 konversationer. Han sa: 'Jag vill att folk ska bli kära i personen, inte i utseendet.' Jag tänkte att det var ganska uppenbart att han pratar om Ella.",
-    type: "note",
-    source: "manual",
+
     metadata: { app_demo: true },
     created_at: daysAgo(45),
     subjectNames: ["Kasper", "Ella", "Kaspers app"],
@@ -546,8 +506,7 @@ const chunks: {
   {
     content:
       "Kasper frågade Theo om att betatesta Blindspot. Theo sa ja men har inte ens laddat ner den. Kasper frågade Joel också — Joel sa: 'Jag dejtingappar inte, men jag ska ge feedback på UX:en.' Kasper har lagt ner typ 200 timmar på appen vid det här laget. Jag tror det är hans sätt att hantera uppbrottet — att koda istället för att känna.",
-    type: "note",
-    source: "manual",
+
     metadata: { coping_mechanism: true },
     created_at: daysAgo(30),
     subjectNames: ["Kasper", "Theo", "Joel", "Kaspers app", "Uppbrottet"],
@@ -557,8 +516,7 @@ const chunks: {
   {
     content:
       "Ella hittade en lokal på Tredje Långgatan som skulle vara perfekt för kaféet! 55 kvm, bra läge, men hyran är 18 000/mån. Hon har sparat 120 000 kr men behöver minst 400 000 för att komma igång (utrustning, renovering, första månadernas hyra). Funderar på att fråga sin mamma om resten.",
-    type: "note",
-    source: "manual",
+
     metadata: { dream: true, budget: true },
     created_at: daysAgo(38),
     subjectNames: ["Ella", "Ellas kafédröm", "Pengastressen"],
@@ -566,8 +524,7 @@ const chunks: {
   {
     content:
       "Joel erbjöd sig att spela akustiskt på Ellas kafé om hon öppnar det. 'Varje torsdag, gratis, för evigt.' Ella blev rörd till tårar. Moa sa att hon vill göra konsten till väggarna. Freja sa att hon kan hjälpa med bokföringen. Det var en av de där stunderna där gruppen kändes som förr — alla vill hjälpa Ella nå sin dröm.",
-    type: "note",
-    source: "manual",
+
     metadata: { heartwarming: true, group_support: true },
     created_at: daysAgo(20),
     subjectNames: ["Ella", "Joel", "Moa", "Freja", "Ellas kafédröm", "Gruppdynamiken"],
@@ -577,8 +534,7 @@ const chunks: {
   {
     content:
       "Fredagsmiddagen hos Joel. Alla utom Kasper kom — till och med Saga och Anton. Det var faktiskt mysigt. Theo och Anton lagade thaimat. Joel spelade lite gitarr. Ella och Saga pratade normalt (ytligt men utan spänning). Freja och Anton satt bredvid varandra hela kvällen. Wilma drack bara öl istället för shots — ett framsteg. Moa sa: 'Det här var nice. Vi borde göra det oftare.'",
-    type: "note",
-    source: "manual",
+
     metadata: { positive: true, progress: true },
     created_at: daysAgo(10),
     subjectNames: ["Joel", "Ella", "Saga", "Anton", "Freja", "Wilma", "Moa", "Theo", "Fredagsmiddagarna", "Gruppdynamiken"],
@@ -586,8 +542,7 @@ const chunks: {
   {
     content:
       "Joel sa en konstig sak till Noel igår: 'Vet du, jag tror inte jag gillar Saga på det sättet egentligen. Hon är cool men det saknas nåt.' Noel frågade vad han menade. Joel: 'Jag vet inte. Det känns inte som med...' och sen tystnade han. Noel tror han tänkte säga 'som med Ella' men fångade sig. KAN DET VARA SÅ att Joel har feelings för Ella också?!",
-    type: "note",
-    source: "manual",
+
     metadata: { plot_twist: true, maybe_mutual: true },
     created_at: daysAgo(5),
     subjectNames: ["Joel", "Noel", "Saga", "Ella", "Kärlekstriangeln"],
@@ -595,8 +550,7 @@ const chunks: {
   {
     content:
       "Kasper ringde mig (Freja) och sa att han mår bättre. Terapin hjälper. Han sa: 'Jag tror jag börjar acceptera att det är över med Ella. Men jag vill inte tappa gruppen.' Han frågade om vernissagen — 'Tror du det vore okej om jag kom?' Jag sa absolut. Han lät lättad. Kanske det börjar läka nu.",
-    type: "note",
-    source: "manual",
+
     metadata: { healing: true, progress: true },
     created_at: daysAgo(3),
     subjectNames: ["Kasper", "Freja", "Ella", "Moas vernissage", "Uppbrottet"],
@@ -604,8 +558,7 @@ const chunks: {
   {
     content:
       "Sammanfattning av läget just nu: Ella gillar Joel men tror han gillar Saga. Joel kanske gillar Ella men vet det inte själv. Saga gillar Joel. Kasper börjar komma över Ella. Noel gillar Moa som är med Theo som spelar bort deras pengar. Freja gillar Anton som nyss öppnat upp sig. Wilma kämpar med alkoholen och bär på hemligheten om Kasper. Moas vernissage om 6 veckor kan bli antingen det som enar gruppen eller det som spränger den.",
-    type: "note",
-    source: "manual",
+
     metadata: { status_update: true, overview: true },
     created_at: daysAgo(1),
     subjectNames: ["Ella", "Joel", "Saga", "Kasper", "Noel", "Moa", "Theo", "Freja", "Anton", "Wilma", "Kärlekstriangeln", "Theos hemlighet", "Wilmas gräns", "Moas vernissage", "Gruppdynamiken"],
@@ -614,61 +567,69 @@ const chunks: {
 
 async function seed() {
   console.log("Clearing existing data...");
-  await query("DELETE FROM chunk_subjects");
-  await query("DELETE FROM chunks");
-  await query("DELETE FROM subjects");
+  await db.delete(chunkSubjects);
+  await db.delete(chunks);
+  await db.delete(subjects);
 
   console.log("Generating subject embeddings...");
-  const summaryTexts = subjects.map((s) => `${s.name}: ${s.summary}`);
+  const summaryTexts = subjectData.map((s) => `${s.name}: ${s.summary}`);
   const summaryEmbeddings = await embedBatch(summaryTexts);
 
   console.log("Inserting subjects...");
-  const subjectIdMap: Record<string, string> = {};
+  const subjectIdMap: Record<string, number> = {};
 
-  for (let i = 0; i < subjects.length; i++) {
-    const s = subjects[i];
+  for (let i = 0; i < subjectData.length; i++) {
+    const s = subjectData[i];
     const vec = `[${summaryEmbeddings[i].join(",")}]`;
-    const rows = await query(
-      `INSERT INTO subjects (name, type, summary, summary_embedding, last_consolidated_at, created_at)
-       VALUES ($1, $2, $3, $4::vector, now(), now())
-       RETURNING id`,
-      [s.name, s.type, s.summary, vec]
-    );
-    subjectIdMap[s.name] = rows[0].id;
-    console.log(`  + Subject: ${s.name} (${rows[0].id})`);
+
+    const [row] = await db
+      .insert(subjects)
+      .values({
+        name: s.name,
+        type: s.type,
+        summary: s.summary,
+        summaryEmbedding: vec,
+      })
+      .returning({ id: subjects.id });
+
+    subjectIdMap[s.name] = row.id;
+    console.log(`  + Subject: ${s.name} (${row.id})`);
   }
 
   console.log("Generating chunk embeddings...");
-  const chunkTexts = chunks.map((c) => c.content);
+  const chunkTexts = chunkData.map((c) => c.content);
   const chunkEmbeddings = await embedBatch(chunkTexts);
 
   console.log("Inserting chunks...");
-  for (let i = 0; i < chunks.length; i++) {
-    const c = chunks[i];
+  for (let i = 0; i < chunkData.length; i++) {
+    const c = chunkData[i];
     const vec = `[${chunkEmbeddings[i].join(",")}]`;
-    const rows = await query(
-      `INSERT INTO chunks (content, type, source, embedding, metadata, created_at, updated_at)
-       VALUES ($1, $2, $3, $4::vector, $5, $6, $6)
-       RETURNING id`,
-      [c.content, c.type, c.source, vec, JSON.stringify(c.metadata), c.created_at]
-    );
-    const chunkId = rows[0].id;
+
+    const [row] = await db
+      .insert(chunks)
+      .values({
+        content: c.content,
+        embedding: vec,
+        metadata: c.metadata,
+        createdAt: c.created_at,
+        updatedAt: c.created_at,
+      })
+      .returning({ id: chunks.id });
 
     for (const name of c.subjectNames) {
       const subjectId = subjectIdMap[name];
       if (subjectId) {
-        await query(
-          `INSERT INTO chunk_subjects (chunk_id, subject_id) VALUES ($1, $2)`,
-          [chunkId, subjectId]
-        );
+        await db
+          .insert(chunkSubjects)
+          .values({ chunkId: row.id, subjectId });
       }
     }
-    console.log(`  + Chunk ${i + 1}/${chunks.length}: ${c.type} (${c.subjectNames.join(", ")})`);
+    console.log(`  + Chunk ${i + 1}/${chunkData.length}: (${c.subjectNames.join(", ")})`);
   }
 
   console.log("\nSeed complete!");
-  console.log(`  Subjects: ${subjects.length}`);
-  console.log(`  Chunks: ${chunks.length}`);
+  console.log(`  Subjects: ${subjectData.length}`);
+  console.log(`  Chunks: ${chunkData.length}`);
 
   await end();
 }

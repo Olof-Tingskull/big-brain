@@ -8,8 +8,10 @@ import {
   link_chunk_subject,
   list_subject_chunks,
 } from "./write-tools.js";
+import { search_subjects } from "./tools.js";
 import { c } from "./colors.js";
 import { WRITER_MODEL, WRITER_SYSTEM, writerTools } from "./prompts.js";
+import type { RetrievalResult } from "./retrieval.js";
 
 const openai = new OpenAI();
 
@@ -18,9 +20,11 @@ async function executeWriterTool(
   input: Record<string, any>
 ): Promise<string> {
   switch (name) {
+    case "search_subjects":
+      return JSON.stringify(await search_subjects(input.query));
     case "create_chunk":
       return JSON.stringify(
-        await create_chunk(input.content, input.type, input.metadata, input.subject_ids)
+        await create_chunk(input.content, input.metadata, input.subject_ids)
       );
     case "update_chunk":
       return JSON.stringify(await update_chunk(input.chunk_id, input.content));
@@ -47,13 +51,28 @@ async function executeWriterTool(
 
 export async function runWriterAgent(
   userInput: string,
-  retrievalContext: string
+  retrieval: RetrievalResult
 ): Promise<string> {
+  // Build structured context with IDs for the writer
+  const subjectList = retrieval.data.subjects
+    .map((s) => `  [subject ${s.id}] ${s.name} (${s.type}): ${s.summary ?? "ingen sammanfattning"}`)
+    .join("\n");
+
+  const chunkList = retrieval.data.chunks
+    .map((ch) => `  [chunk ${ch.id}] ${ch.content.slice(0, 120)}${ch.content.length > 120 ? "..." : ""}`)
+    .join("\n");
+
+  const structuredContext = [
+    retrieval.summary,
+    subjectList ? `\nBEFINTLIGA SUBJECTS:\n${subjectList}` : "",
+    chunkList ? `\nBEFINTLIGA CHUNKS:\n${chunkList}` : "",
+  ].filter(Boolean).join("\n");
+
   const messages: OpenAI.ChatCompletionMessageParam[] = [
     { role: "system", content: WRITER_SYSTEM },
     {
       role: "user",
-      content: `NY INFORMATION:\n${userInput}\n\nBEFINTLIG KONTEXT:\n${retrievalContext}`,
+      content: `NY INFORMATION:\n${userInput}\n\nBEFINTLIG KONTEXT:\n${structuredContext}`,
     },
   ];
 

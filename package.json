@@ -3,17 +3,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "seed": "tsx seed.ts",
-    "retrieve": "tsx retrieve.ts",
-    "ingest": "tsx ingest.ts"
+    "seed": "tsx cmd/seed.ts",
+    "retrieve": "tsx cmd/retrieve.ts",
+    "ingest": "tsx cmd/ingest.ts",
+    "studio": "drizzle-kit studio",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.45.1",
     "openai": "^4.77.0",
     "pg": "^8.13.1"
   },
   "devDependencies": {
     "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.31.9",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

@@ -1,10 +1,10 @@
 import readline from "readline";
-import { end } from "./lib/db.js";
-import { c } from "./lib/colors.js";
-import { formatMarkdown } from "./lib/format.js";
-import { WRITER_MODEL, RETRIEVAL_MODEL } from "./lib/prompts.js";
-import { runRetrievalAgent } from "./lib/retrieval.js";
-import { runWriterAgent } from "./lib/writer.js";
+import { end } from "../lib/db.js";
+import { c } from "../lib/colors.js";
+import { formatMarkdown } from "../lib/format.js";
+import { WRITER_MODEL, RETRIEVAL_MODEL } from "../lib/prompts.js";
+import { runRetrievalAgent } from "../lib/retrieval.js";
+import { runWriterAgent } from "../lib/writer.js";
 import "dotenv/config";
 
 async function main() {

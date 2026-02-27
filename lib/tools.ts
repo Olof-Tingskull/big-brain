@@ -1,39 +1,56 @@
-import { query } from "./db.js";
+import { db } from "./db.js";
+import { chunks, subjects, chunkSubjects } from "./schema.js";
 import { embed } from "./embeddings.js";
+import { sql, eq, ilike, and } from "drizzle-orm";
 
 export async function search_subjects(queryText: string) {
   const embedding = await embed(queryText);
   const vec = `[${embedding.join(",")}]`;
 
-  const rows = await query(
-    `SELECT id, name, type, summary,
-            1 - (summary_embedding <=> $1::vector) AS similarity
-     FROM subjects
-     WHERE summary_embedding IS NOT NULL
-     ORDER BY summary_embedding <=> $1::vector
-     LIMIT 5`,
-    [vec]
-  );
+  const vectorRows = await db
+    .select({
+      id: subjects.id,
+      name: subjects.name,
+      type: subjects.type,
+      summary: subjects.summary,
+      similarity: sql<number>`1 - (${subjects.summaryEmbedding} <=> ${vec}::vector)`.as(
+        "similarity"
+      ),
+    })
+    .from(subjects)
+    .where(sql`${subjects.summaryEmbedding} IS NOT NULL`)
+    .orderBy(sql`${subjects.summaryEmbedding} <=> ${vec}::vector`)
+    .limit(5);
 
-  // Also do fuzzy match on name
-  const fuzzy = await query(
-    `SELECT id, name, type, summary
-     FROM subjects
-     WHERE name ILIKE $1
-     LIMIT 5`,
-    [`%${queryText}%`]
-  );
+  const fuzzyRows = await db
+    .select({
+      id: subjects.id,
+      name: subjects.name,
+      type: subjects.type,
+      summary: subjects.summary,
+    })
+    .from(subjects)
+    .where(ilike(subjects.name, `%${queryText}%`))
+    .limit(5);
 
   // Merge, deduplicate by id
-  const seen = new Set(rows.map((r) => r.id));
-  for (const f of fuzzy) {
+  const seen = new Set(vectorRows.map((r) => r.id));
+  const merged: {
+    id: number;
+    name: string;
+    type: string;
+    summary: string | null;
+    similarity: number | null;
+  }[] = [...vectorRows];
+
+  for (const f of fuzzyRows) {
     if (!seen.has(f.id)) {
-      rows.push({ ...f, similarity: null });
+      merged.push({ ...f, similarity: null });
       seen.add(f.id);
     }
   }
 
-  return rows.slice(0, 5).map((r) => ({
+  return merged.slice(0, 5).map((r) => ({
     id: r.id,
     name: r.name,
     type: r.type,
@@ -43,32 +60,27 @@ export async function search_subjects(queryText: string) {
 }
 
 export async function get_subject_chunks(
-  subject_id: string,
-  type?: string
+  subject_id: number,
+  limit?: number
 ) {
-  const params: any[] = [subject_id];
-  let typeClause = "";
-  if (type) {
-    typeClause = "AND c.type = $2";
-    params.push(type);
-  }
-
-  const rows = await query(
-    `SELECT c.id, c.content, c.type, c.source, c.metadata, c.created_at
-     FROM chunks c
-     JOIN chunk_subjects cs ON cs.chunk_id = c.id
-     WHERE cs.subject_id = $1 ${typeClause}
-     ORDER BY c.created_at DESC`,
-    params
-  );
+  const rows = await db
+    .select({
+      id: chunks.id,
+      content: chunks.content,
+      metadata: chunks.metadata,
+      createdAt: chunks.createdAt,
+    })
+    .from(chunks)
+    .innerJoin(chunkSubjects, eq(chunkSubjects.chunkId, chunks.id))
+    .where(eq(chunkSubjects.subjectId, subject_id))
+    .orderBy(sql`${chunks.createdAt} DESC`)
+    .limit(limit ?? 50);
 
   return rows.map((r) => ({
     id: r.id,
     content: r.content,
-    type: r.type,
-    source: r.source,
     metadata: r.metadata,
-    created_at: r.created_at,
+    created_at: r.createdAt,
   }));
 }
 
@@ -76,23 +88,46 @@ export async function search_chunks(queryText: string) {
   const embedding = await embed(queryText);
   const vec = `[${embedding.join(",")}]`;
 
-  const rows = await query(
-    `SELECT c.id, c.content, c.type, c.source, c.metadata, c.created_at,
-            1 - (c.embedding <=> $1::vector) AS similarity
-     FROM chunks c
-     WHERE c.embedding IS NOT NULL
-     ORDER BY c.embedding <=> $1::vector
-     LIMIT 10`,
-    [vec]
-  );
+  const rows = await db
+    .select({
+      id: chunks.id,
+      content: chunks.content,
+      metadata: chunks.metadata,
+      createdAt: chunks.createdAt,
+      similarity: sql<number>`1 - (${chunks.embedding} <=> ${vec}::vector)`.as(
+        "similarity"
+      ),
+    })
+    .from(chunks)
+    .where(sql`${chunks.embedding} IS NOT NULL`)
+    .orderBy(sql`${chunks.embedding} <=> ${vec}::vector`)
+    .limit(10);
 
   return rows.map((r) => ({
     id: r.id,
     content: r.content,
-    type: r.type,
-    source: r.source,
     metadata: r.metadata,
-    created_at: r.created_at,
+    created_at: r.createdAt,
     similarity: r.similarity,
+  }));
+}
+
+export async function get_chunk_subjects(chunk_id: number) {
+  const rows = await db
+    .select({
+      id: subjects.id,
+      name: subjects.name,
+      type: subjects.type,
+      summary: subjects.summary,
+    })
+    .from(subjects)
+    .innerJoin(chunkSubjects, eq(chunkSubjects.subjectId, subjects.id))
+    .where(eq(chunkSubjects.chunkId, chunk_id));
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    summary: r.summary,
   }));
 }

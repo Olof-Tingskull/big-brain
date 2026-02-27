@@ -1,10 +1,10 @@
 import OpenAI from "openai";
 import readline from "readline";
-import { end } from "./lib/db.js";
-import { c } from "./lib/colors.js";
-import { formatMarkdown } from "./lib/format.js";
-import { MODEL, RETRIEVAL_MODEL, MAIN_SYSTEM, mainTools } from "./lib/prompts.js";
-import { runRetrievalAgent } from "./lib/retrieval.js";
+import { end } from "../lib/db.js";
+import { c } from "../lib/colors.js";
+import { formatMarkdown } from "../lib/format.js";
+import { MODEL, RETRIEVAL_MODEL, MAIN_SYSTEM, mainTools } from "../lib/prompts.js";
+import { runRetrievalAgent } from "../lib/retrieval.js";
 import "dotenv/config";
 
 const openai = new OpenAI();
@@ -60,7 +60,7 @@ async function main() {
           messages.push({
             role: "tool",
             tool_call_id: searchBrainCall.id,
-            content: retrievalResult,
+            content: retrievalResult.summary,
           });
 
           const finalResponse = await openai.chat.completions.create({
