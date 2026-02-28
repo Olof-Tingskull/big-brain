@@ -104,9 +104,16 @@ export async function runRetrievalAgent(
       toolCallCount++;
       const args = JSON.parse(toolCall.function.arguments);
       const color = toolColor(toolCall.function.name);
-      const argsStr = Object.values(args).join(", ");
-      console.log(`  ${c.dim}${toolCallCount}/15${c.reset}  ${color}${toolCall.function.name}${c.reset}${c.gray}(${argsStr})${c.reset}`);
-      const result = await executeRetrievalTool(toolCall.function.name, args);
+      const toolName = toolCall.function.name;
+
+      // Show subject name instead of raw ID for get_subject_chunks
+      let label = Object.values(args).join(", ");
+      if (toolName === "get_subject_chunks" && collectedSubjects.has(args.subject_id)) {
+        label = collectedSubjects.get(args.subject_id)!.name;
+      }
+
+      console.log(`  ${c.dim}${toolCallCount}/15${c.reset}  ${color}${toolName}${c.reset}${c.gray}(${label})${c.reset}`);
+      const result = await executeRetrievalTool(toolName, args);
       const parsed = JSON.parse(result);
       const count = Array.isArray(parsed) ? parsed.length : 0;
       console.log(`       ${count > 0 ? c.green : c.red}${count} results${c.reset}`);
@@ -114,13 +121,31 @@ export async function runRetrievalAgent(
       // Collect structured data
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
-          if (toolCall.function.name === "search_subjects" || toolCall.function.name === "get_chunk_subjects") {
+          if (toolName === "search_subjects" || toolName === "get_chunk_subjects") {
             if (item.id != null && item.name) {
               collectedSubjects.set(item.id, { id: item.id, name: item.name, type: item.type, summary: item.summary });
             }
           } else {
             if (item.id != null && item.content) {
               collectedChunks.set(item.id, { id: item.id, content: item.content, metadata: item.metadata, created_at: item.created_at });
+            }
+          }
+        }
+      }
+
+      // Show titles/previews of results
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        if (toolName === "search_subjects" || toolName === "get_chunk_subjects") {
+          for (const item of parsed) {
+            if (item.name) {
+              console.log(`       ${c.dim}· ${item.name}${c.reset}`);
+            }
+          }
+        } else if (toolName === "search_chunks" || toolName === "get_subject_chunks") {
+          for (const item of parsed) {
+            if (item.content) {
+              const preview = item.content.replace(/\n/g, " ").slice(0, 80);
+              console.log(`       ${c.dim}· ${preview}${item.content.length > 80 ? "…" : ""}${c.reset}`);
             }
           }
         }

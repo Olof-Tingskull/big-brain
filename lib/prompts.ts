@@ -43,10 +43,13 @@ Du har fyra verktyg:
 - get_chunk_subjects(chunk_id): Hämta alla subjects kopplade till en chunk. Användbart för att utforska kopplingar. chunk_id är ett heltal.
 
 VIKTIGT — följ denna strategi EXAKT:
-1. Börja ALLTID med search_subjects för att hitta relevanta subjects.
+1. Börja med BÅDE search_subjects OCH search_chunks parallellt (i samma svar).
+   - search_subjects hittar kända entiteter (personer, projekt, företag) via sammanfattningar.
+   - search_chunks hittar specifika detaljer, datum och info som kanske inte är kopplad till rätt subject.
+   Använd ALLTID båda — de söker i olika rymder och kompletterar varandra.
 2. För VARJE relevant subject du hittar, anropa get_subject_chunks med dess id. Detta steg är OBLIGATORISKT — search_subjects ger bara sammanfattningar, inte själva innehållet.
-3. Om du behöver bredare sökning, använd search_chunks.
-4. Svara ALDRIG att du inte hittat information utan att ha anropat get_subject_chunks minst en gång.
+3. Använd get_chunk_subjects om du vill utforska kopplingar från intressanta chunks.
+4. Svara ALDRIG att du inte hittat information utan att ha anropat BÅDE search_subjects och search_chunks.
 
 Max ${MAX_TOOL_CALLS} tool calls totalt. När du har tillräckligt med information, svara med en strukturerad sammanfattning. Inkludera relevanta detaljer, datum och kontext.`;
 
