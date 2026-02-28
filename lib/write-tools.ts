@@ -116,6 +116,18 @@ export async function link_chunk_subject(
   return { linked: true };
 }
 
+export async function mark_consolidated(
+  subject_id: number
+): Promise<{ marked: boolean }> {
+  await db
+    .update(subjects)
+    .set({ lastConsolidatedAt: sql`now()` })
+    .where(eq(subjects.id, subject_id));
+
+  console.log(`  ${c.green}[CONSOLIDATED]${c.reset} ${c.dim}subject ${subject_id}${c.reset}`);
+  return { marked: true };
+}
+
 export async function list_subject_chunks(
   subject_id: number
 ): Promise<{ id: number; content: string; created_at: Date | null }[]> {

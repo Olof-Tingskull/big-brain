@@ -6,6 +6,9 @@
     "seed": "tsx cmd/seed.ts",
     "clear": "tsx cmd/clear.ts",
     "brain": "tsx cmd/brain.ts",
+    "consolidate": "tsx cmd/consolidate.ts",
+    "crosslink": "tsx cmd/crosslink.ts",
+    "graph": "tsx cmd/graph.ts",
     "studio": "drizzle-kit studio",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"

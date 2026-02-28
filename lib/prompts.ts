@@ -239,6 +239,180 @@ export const writerTools: OpenAI.ChatCompletionTool[] = [
   },
 ];
 
+// ── Consolidation agent ──
+
+export const CONSOLIDATOR_MODEL = "gpt-5.2";
+export const MAX_CONSOLIDATOR_TOOL_CALLS = 25;
+
+export const CONSOLIDATOR_SYSTEM = `Du underhåller ett minnessystem. Du får ett subject och dess chunks.
+Din uppgift:
+- Splitta chunks som är för långa (> ~300 tecken) eller blandar flera ämnen i separata, fokuserade chunks
+- Merga chunks som överlappar eller kan kondenseras
+- Uppdatera subject summary baserat på nuvarande chunks
+- Varje chunk ska handla om EN sak eller ETT sammanhängande ämne
+- TODO-listor: splitta per KATEGORI (t.ex. "Dataanalys", "Teknik", "UX"), INTE per enskild punkt. En TODO-chunk per kategori med 2-5 punkter är bra. Skapa ALDRIG en chunk per enskild TODO-punkt.
+- Repo-dokumentation bör separeras från produkt-beskrivningar
+- Bevara ALL information — inget får tappas bort
+- Räkna dina tool calls. Du har max 25 totalt — planera därefter.
+
+Var konservativ. Ändra bara det som behöver ändras. Om chunks redan ser bra ut, rör dem inte.
+
+Du har dessa verktyg:
+- list_subject_chunks(subject_id): Lista alla chunks för ett subject (med id, content, created_at). Anropa detta FÖRST om du vill se aktuellt läge.
+- create_chunk(content, metadata, subject_ids): Skapa ny chunk med kopplingar. subject_ids är en lista av heltal.
+- update_chunk(chunk_id, content): Uppdatera en chunk (regenerar embedding). chunk_id är heltal.
+- delete_chunk(chunk_id): Ta bort en chunk och alla dess kopplingar. chunk_id är heltal.
+- create_subject(name, type, initial_summary): Skapa nytt subject. Bara om det behövs (t.ex. separera repo-docs från produkt).
+- update_subject_summary(subject_id, new_summary): Uppdatera sammanfattning. subject_id är heltal.
+- link_chunk_subject(chunk_id, subject_id): Koppla en chunk till ett subject. Båda heltal.
+- mark_consolidated(subject_id): Markera subject som consoliderat. Anropa detta SIST när du är klar.
+
+STRATEGI:
+1. Analysera alla chunks du får. Identifiera problem: för långa, blandade ämnen, överlapp.
+2. Splitta/merga/uppdatera det som behöver ändras.
+3. Uppdatera subject summary om det behövs.
+4. Anropa mark_consolidated(subject_id) som sista steg.
+
+VIKTIGT:
+- När du splittar en chunk: skapa de nya först, koppla dem, ta sedan bort originalet.
+- När du mergar: skapa ny merged chunk, ta sedan bort de gamla.
+- subject_ids i create_chunk ska alltid inkludera MINST det aktuella subjectets ID.
+- Skriv kort och koncist — undvik att citera hela chunk-innehåll i dina svar.
+
+Svara på svenska med en kort sammanfattning av vad du gjorde.`;
+
+export const consolidatorTools: OpenAI.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "list_subject_chunks",
+      description: "Lista alla befintliga chunks kopplade till ett subject.",
+      parameters: {
+        type: "object",
+        properties: {
+          subject_id: { type: "integer", description: "Subject-ID (heltal)" },
+        },
+        required: ["subject_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_chunk",
+      description: "Skapa en ny chunk med kopplingar till subjects.",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "Innehållet i chunken" },
+          metadata: {
+            type: "object",
+            description: "Extra metadata (t.ex. datum, taggar)",
+          },
+          subject_ids: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Lista av subject-IDn (heltal) att koppla till",
+          },
+        },
+        required: ["content", "metadata", "subject_ids"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_chunk",
+      description: "Uppdatera innehållet i en befintlig chunk. Embedding regeneras automatiskt.",
+      parameters: {
+        type: "object",
+        properties: {
+          chunk_id: { type: "integer", description: "Chunk-ID (heltal)" },
+          content: { type: "string", description: "Nytt innehåll" },
+        },
+        required: ["chunk_id", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_chunk",
+      description: "Ta bort en chunk och alla dess kopplingar.",
+      parameters: {
+        type: "object",
+        properties: {
+          chunk_id: { type: "integer", description: "Chunk-ID (heltal)" },
+        },
+        required: ["chunk_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_subject",
+      description: "Skapa ett nytt subject. Typ är fri text (person, project, concept, etc).",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Namn på subject" },
+          type: {
+            type: "string",
+            description: "Typ av subject (fri text)",
+          },
+          initial_summary: { type: "string", description: "Sammanfattning" },
+        },
+        required: ["name", "type", "initial_summary"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_subject_summary",
+      description: "Uppdatera sammanfattningen för ett subject. Embedding regeneras automatiskt.",
+      parameters: {
+        type: "object",
+        properties: {
+          subject_id: { type: "integer", description: "Subject-ID (heltal)" },
+          new_summary: { type: "string", description: "Ny sammanfattning" },
+        },
+        required: ["subject_id", "new_summary"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "link_chunk_subject",
+      description: "Koppla en chunk till ett subject.",
+      parameters: {
+        type: "object",
+        properties: {
+          chunk_id: { type: "integer", description: "Chunk-ID (heltal)" },
+          subject_id: { type: "integer", description: "Subject-ID (heltal)" },
+        },
+        required: ["chunk_id", "subject_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "mark_consolidated",
+      description: "Markera ett subject som consoliderat. Anropa detta som SISTA steg.",
+      parameters: {
+        type: "object",
+        properties: {
+          subject_id: { type: "integer", description: "Subject-ID (heltal)" },
+        },
+        required: ["subject_id"],
+      },
+    },
+  },
+];
+
 export const retrievalTools: OpenAI.ChatCompletionTool[] = [
   {
     type: "function",

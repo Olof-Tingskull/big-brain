@@ -1,6 +1,6 @@
 # big-brain
 
-A "second brain" prototype. Scripts + Postgres, no frameworks. Stores notes, todos, meeting notes and tickets as vector-embedded chunks, linked to subjects (people, projects, concepts, workflows). Retrieval is done by a two-agent Claude system: a conversational agent that delegates search to a retrieval agent that autonomously queries the database.
+A "second brain" personal memory system. Scripts + Postgres, no frameworks. Stores knowledge as vector-embedded chunks linked to subjects (people, projects, concepts, workflows). Uses a three-agent LLM architecture: a conversational agent delegates search to a retrieval agent and writing to a writer agent, both of which autonomously query and mutate the database.
 
 ## Prerequisites
 
@@ -14,8 +14,7 @@ A "second brain" prototype. Scripts + Postgres, no frameworks. Stores notes, tod
 cd big-brain
 
 # 1. Set your API keys
-cp .env .env.local   # or just edit .env directly
-# Fill in:
+# Edit .env directly:
 #   OPENAI_API_KEY=sk-...
 #   DATABASE_URL=postgresql://bigbrain:bigbrain@localhost:5432/bigbrain
 
@@ -25,63 +24,87 @@ npm install
 # 3. Start Postgres (pgvector)
 docker compose up -d
 
-# 4. Wait a few seconds for Postgres to initialize, then seed
-npx tsx seed.ts
+# 4. Run migrations
+npm run db:migrate
 
-# 5. Start the interactive retrieval CLI
-npx tsx retrieve.ts
+# 5. Seed the database with mock data
+npm run seed
+
+# 6. Start the interactive CLI
+npm run brain
 ```
 
-To reset the database completely (drops volume, re-runs schema.sql on next start):
+To reset the database completely:
 
 ```bash
 docker compose down -v
 docker compose up -d
-# wait a few seconds
-npx tsx seed.ts
+npm run db:migrate
+npm run seed
 ```
+
+## npm scripts
+
+| Script              | Description                                    |
+|---------------------|------------------------------------------------|
+| `npm run brain`     | Interactive CLI — ask questions + store info    |
+| `npm run seed`      | Populate database with mock data + embeddings  |
+| `npm run clear`     | Delete all data from the database              |
+| `npm run graph`     | Start knowledge graph visualization on :4444   |
+| `npm run studio`    | Open Drizzle ORM studio                        |
+| `npm run db:generate` | Generate migration files from schema changes |
+| `npm run db:migrate`  | Apply pending migrations                     |
 
 ## File structure
 
 ```
 big-brain/
 ├── docker-compose.yml          # pgvector/pgvector:pg16, port 5432
-├── schema.sql                  # Mounted as init script, creates tables + indexes
-├── package.json                # pg, openai, dotenv, tsx
+├── drizzle.config.ts           # Drizzle ORM configuration
+├── package.json
 ├── tsconfig.json
 ├── .env                        # API keys + DATABASE_URL
-├── .gitignore
+│
+├── cmd/
+│   ├── brain.ts                # Interactive CLI (read + write)
+│   ├── seed.ts                 # Populates DB with mock data + real embeddings
+│   ├── clear.ts                # Wipes all data
+│   └── graph.ts                # Knowledge graph visualization server
 │
 ├── lib/
-│   ├── db.ts                   # pg Pool, query(), queryOne(), end()
+│   ├── db.ts                   # pg Pool + drizzle-orm wrapper
+│   ├── schema.ts               # Drizzle table definitions (chunks, subjects, chunk_subjects)
 │   ├── embeddings.ts           # embed(text), embedBatch(texts) via OpenAI
-│   └── tools.ts                # search_subjects, get_subject_chunks, search_chunks
+│   ├── prompts.ts              # System prompts + tool schemas for all three agents
+│   ├── tools.ts                # Read-only DB queries (retrieval agent tools)
+│   ├── write-tools.ts          # DB mutations (writer agent tools)
+│   ├── retrieval.ts            # Retrieval agent loop
+│   ├── writer.ts               # Writer agent loop
+│   ├── colors.ts               # ANSI terminal colors
+│   └── format.ts               # Markdown formatting for CLI output
 │
-├── seed.ts                     # Populates DB with mock data + real embeddings
-└── retrieve.ts                 # Interactive CLI with two-agent retrieval
+└── drizzle/                    # Generated migration SQL files
 ```
 
 ## Database schema
 
-Three tables, all using UUIDs:
+Three tables using serial integer IDs and pgvector (1536-dim embeddings). Schema is defined in `lib/schema.ts` and managed with Drizzle ORM migrations.
 
 **chunks** — individual pieces of information
 | Column     | Type             | Notes                                      |
 |------------|------------------|--------------------------------------------|
-| id         | uuid (PK)        | gen_random_uuid()                          |
+| id         | serial (PK)      | Auto-incrementing integer                  |
 | content    | text             | The actual text                            |
-| type       | text             | `note`, `todo`, `email`, or `ticket`       |
-| source     | text             | `manual`, `gmail`, or `github`             |
 | embedding  | vector(1536)     | OpenAI text-embedding-3-small              |
-| metadata   | jsonb            | Freeform (priority, assignee, PR#, etc.)   |
+| metadata   | jsonb            | Freeform (emotional, date, tags, etc.)     |
 | created_at | timestamptz      |                                            |
 | updated_at | timestamptz      |                                            |
 
 **subjects** — entities that chunks relate to
 | Column              | Type          | Notes                                    |
 |---------------------|---------------|------------------------------------------|
-| id                  | uuid (PK)     | gen_random_uuid()                        |
-| name                | text          | e.g. "Erik", "AI Twin", "SSO"           |
+| id                  | serial (PK)   | Auto-incrementing integer                |
+| name                | text (unique) | e.g. "Ella", "Dimljus", "Uppbrottet"    |
 | type                | text          | `person`, `project`, `concept`, `workflow` |
 | summary             | text          | Human-readable summary of the subject    |
 | summary_embedding   | vector(1536)  | Embedding of "{name}: {summary}"         |
@@ -89,10 +112,10 @@ Three tables, all using UUIDs:
 | created_at          | timestamptz   |                                          |
 
 **chunk_subjects** — many-to-many join table
-| Column     | Type | Notes                       |
-|------------|------|-----------------------------|
-| chunk_id   | uuid | FK → chunks, cascade delete |
-| subject_id | uuid | FK → subjects, cascade delete |
+| Column     | Type    | Notes                         |
+|------------|---------|-------------------------------|
+| chunk_id   | integer | FK → chunks, cascade delete   |
+| subject_id | integer | FK → subjects, cascade delete |
 
 Both `chunks.embedding` and `subjects.summary_embedding` have IVFFlat indexes for fast cosine similarity search.
 
@@ -100,11 +123,15 @@ Both `chunks.embedding` and `subjects.summary_embedding` have IVFFlat indexes fo
 
 ### lib/db.ts
 
-Thin wrapper around `pg.Pool`. Reads `DATABASE_URL` from `.env`.
+Drizzle ORM wrapper around `pg.Pool`. Reads `DATABASE_URL` from `.env`.
 
 - `query<T>(sql, params?)` — returns `T[]` (all rows)
 - `queryOne<T>(sql, params?)` — returns first row or `undefined`
 - `end()` — closes the pool
+
+### lib/schema.ts
+
+Drizzle table definitions with a custom `vector` column type. Defines `chunks`, `subjects`, and `chunkSubjects` tables with their indexes and relations.
 
 ### lib/embeddings.ts
 
@@ -113,96 +140,128 @@ Uses OpenAI `text-embedding-3-small` (1536 dimensions).
 - `embed(text)` — returns `number[]` (single embedding)
 - `embedBatch(texts)` — returns `number[][]` (one embedding per input)
 
+### lib/prompts.ts
+
+Defines system prompts (in Swedish), tool schemas (OpenAI function calling format), and model constants for all three agents.
+
 ### lib/tools.ts
 
-Three retrieval functions that the retrieval agent can call:
+Read-only database queries used by the retrieval agent:
 
 - **`search_subjects(query)`** — Embeds the query, does cosine similarity search against `subjects.summary_embedding` (top 5). Also does ILIKE fuzzy match on `subjects.name`. Results are merged and deduplicated.
-
-- **`get_subject_chunks(subject_id, type?)`** — Gets all chunks linked to a subject via `chunk_subjects`. Optional type filter (`note`, `todo`, `email`, `ticket`). Sorted by `created_at DESC`.
-
+- **`get_subject_chunks(subject_id, limit?)`** — Gets all chunks linked to a subject via `chunk_subjects`. Sorted by `created_at DESC`.
 - **`search_chunks(query)`** — Embeds the query, does cosine similarity search directly against `chunks.embedding`. Returns top 10.
+- **`get_chunk_subjects(chunk_id)`** — Gets all subjects linked to a given chunk.
 
-## Seed data
+### lib/write-tools.ts
 
-`seed.ts` populates the database with mock data resembling a tech lead at a small consultancy building an AI product ("AI Twin") for clients. It generates real embeddings via OpenAI for all content.
+Database mutations used by the writer agent:
 
-**6 subjects:**
-| Name         | Type     | Description                                    |
-|--------------|----------|------------------------------------------------|
-| Erik         | person   | Senior fullstack consultant, tech lead         |
-| Lisa         | person   | Backend dev, SSO specialist                    |
-| AI Twin      | project  | Main product — RAG-based AI assistant          |
-| IF Elfsborg  | project  | Customer — football club scouting department   |
-| SSO          | concept  | Azure AD OIDC integration                      |
-| Deployment   | workflow | CI/CD with GitHub Actions, Helm, Kubernetes    |
+- **`create_chunk(content, metadata, subject_ids)`** — Creates a chunk with an auto-generated embedding and links it to subjects.
+- **`update_chunk(chunk_id, content)`** — Updates chunk content and regenerates its embedding.
+- **`delete_chunk(chunk_id)`** — Deletes a chunk and its subject links.
+- **`create_subject(name, type, initial_summary)`** — Creates a subject with a summary embedding. Enforces unique names.
+- **`update_subject_summary(subject_id, new_summary)`** — Updates a subject's summary and regenerates its embedding.
+- **`link_chunk_subject(chunk_id, subject_id)`** — Links a chunk to a subject (idempotent).
+- **`list_subject_chunks(subject_id)`** — Lists all chunks for a subject.
 
-**18 chunks** spanning the last ~45 days: meeting notes, todos, bug tickets, PR notes, experiment logs. Chunks cross-link subjects realistically (e.g. a deployment todo links to Erik + Deployment + IF Elfsborg + AI Twin).
+### lib/retrieval.ts
 
-Running `seed.ts` clears all existing data before inserting. It makes 2 OpenAI API calls (one batch for subject embeddings, one for chunk embeddings).
+Autonomous retrieval agent loop. Takes conversation context, forks a new LLM conversation with a retrieval-focused system prompt, and executes tool calls against the database in a loop (max 20 calls). Returns a structured result with collected subjects and chunks.
 
-## How retrieve.ts works
+### lib/writer.ts
 
-The retrieval system uses a **two-agent architecture**:
+Writer agent loop. Receives user input and retrieval context (subjects + chunks with IDs), then autonomously creates, updates, deletes, and links chunks and subjects (max 15 tool calls).
+
+## How brain.ts works
+
+The main CLI uses a **three-agent architecture**:
 
 ```
-You type a question
+You type a question or new information
         │
         ▼
-┌─────────────────────┐
-│   Main agent        │  GPT-5.2, has tool: search_brain
-│   (conversational)  │  System prompt: "you have a second brain"
-└────────┬────────────┘
-         │ search_brain tool call (no parameters)
-         ▼
-┌─────────────────────────────────────────────┐
-│   Retrieval agent                           │
-│   (autonomous, forked conversation context) │
-│                                             │
-│   Tools: search_subjects(query)             │
-│          get_subject_chunks(subject_id, type?)
-│          search_chunks(query)               │
-│                                             │
-│   Runs in a loop: Claude → tool calls →     │
-│   execute against DB → send results back →  │
-│   repeat until text response (max 6 calls)  │
-└────────┬────────────────────────────────────┘
-         │ structured summary of findings
-         ▼
-┌─────────────────────┐
-│   Main agent        │  Receives retrieval result as tool_result,
-│   (continued)       │  formulates final answer
-└─────────────────────┘
-         │
-         ▼
-    Answer printed to terminal
+┌──────────────────────────────────────────────┐
+│  Retrieval Agent (autonomous)                │
+│  Tools: search_subjects, get_subject_chunks, │
+│         search_chunks, get_chunk_subjects    │
+│  Loops up to 20 tool calls against DB        │
+│  Returns: summary + collected subjects/chunks│
+└──────────────┬───────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────┐
+│  Main Agent (GPT-5.2, streaming)             │
+│  Tool: ingest_to_brain(information)          │
+│                                              │
+│  Receives retrieval context, decides:        │
+│  • Answer directly (question) → stream text  │
+│  • Store info → call ingest_to_brain         │
+│                                              │
+│  IF ingest_to_brain is called:               │
+│  ┌────────────────────────────────────────┐  │
+│  │ Writer Agent (autonomous)              │  │
+│  │ Tools: create_chunk, update_chunk,     │  │
+│  │   delete_chunk, create_subject,        │  │
+│  │   update_subject_summary,              │  │
+│  │   link_chunk_subject, list_subject_chunks│ │
+│  │ Loops up to 15 tool calls              │  │
+│  │ Returns: confirmation text             │  │
+│  └────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
+        │
+        ▼
+   Answer printed to terminal
 ```
 
 ### Step by step
 
-1. You type a question at `du> ` prompt
-2. The main agent (GPT-5.2) decides if it needs to search. If not, it responds directly.
-3. If it calls `search_brain`:
-   - The full conversation history is serialized and sent to a **new** Claude API conversation with a retrieval-focused system prompt
-   - The retrieval agent autonomously makes tool calls (vector search on subjects, fetch chunks, vector search on chunks) — up to 6 calls
-   - Each tool call hits the Postgres database, results are sent back to GPT
-   - When the retrieval agent stops making tool calls, its text response becomes the tool result
-4. The main agent receives the retrieval summary and generates a final answer
-5. The conversation continues — previous context is preserved across turns
+1. You type at the `> ` prompt (questions or new information)
+2. The **retrieval agent** autonomously searches the database — vector search on subjects and chunks, fetching linked data — up to 20 tool calls
+3. The retrieval results are injected as context into the **main agent**'s conversation
+4. The main agent (GPT-5.2, streaming) decides:
+   - If the input is a **question**: it answers based on the retrieved context
+   - If the input is **new information**: it calls `ingest_to_brain`, which triggers the **writer agent** to autonomously create/update chunks and subjects in the database
+5. Conversation history is preserved across turns
 
 ### What you see in the terminal
 
 ```
-du> Vad jobbar Lisa med just nu?
-  [söker i hjärnan...]
-    [retrieval] search_subjects({"query":"Lisa"})
-    [retrieval] get_subject_chunks({"subject_id":"abc-123"})
-    [retrieval] search_chunks({"query":"Lisa arbete uppgifter"})
+> Vad jobbar Ella med?
+  1/20  search_subjects("Ella")
+        1 result
+        · Ella
+  2/20  get_subject_chunks(3)
+        4 results
 
-assistent> Lisa jobbar med flera saker: hon har precis...
+brain > Ella jobbar på ett kafé och drömmer om att...
+
+> Ella har börjat söka nytt jobb
+  1/20  search_subjects("Ella jobb")
+        ...
+
+brain > Noterat! Jag har sparat att Ella har börjat söka nytt jobb.
+  [writer] create_chunk(...)
+  [writer] link_chunk_subject(...)
 ```
 
-Lines prefixed with `[retrieval]` show the retrieval agent's tool calls in real time.
+## Graph visualization
+
+Run `npm run graph` to start an interactive knowledge graph on `http://localhost:4444`. Built with Cytoscape.js.
+
+- **Purple nodes** — subjects (people, projects, concepts)
+- **Cyan nodes** — chunks (information pieces)
+- **Edges** — links between chunks and subjects
+- Click any node to see its details in the info panel
+
+## Seed data
+
+`cmd/seed.ts` populates the database with mock data centered around a friend group in Göteborg. It generates real embeddings via OpenAI for all content.
+
+- **21 subjects** — 10 people, 5 projects, 6 concepts, 3 workflows
+- **49 chunks** — meeting notes, todos, secrets, drama spanning ~120 days
+
+Running `npm run seed` clears all existing data before inserting. It makes 2 OpenAI API calls (one batch for subject embeddings, one for chunk embeddings).
 
 ## Environment variables
 
@@ -219,18 +278,6 @@ postgresql://bigbrain:bigbrain@localhost:5432/bigbrain
 ## Models used
 
 - **Embeddings:** OpenAI `text-embedding-3-small` (1536 dimensions)
-- **Main agent:** OpenAI `gpt-5.2`
-- **Retrieval agent:** OpenAI `gpt-5.2`
+- **All agents:** OpenAI `gpt-5.2`
 
-Both chat completion calls are in `retrieve.ts`. Change the `MODEL` constant there to switch models.
-
-## Extending this
-
-Some ideas for next steps:
-
-- **Ingest script** — add new chunks from CLI, auto-generate embeddings and link subjects
-- **Subject consolidation** — periodically re-summarize subjects based on their latest chunks (use `last_consolidated_at`)
-- **More sources** — Gmail API, GitHub issues API, calendar events
-- **Hybrid search** — combine vector similarity with keyword search (pg_trgm or full-text search)
-- **Streaming** — use Claude's streaming API to show responses token by token
-- **Conversation memory** — persist conversation history so it survives restarts
+Model constants are defined in `lib/prompts.ts`.
